@@ -183,7 +183,10 @@ class MCTSPlayer(object):
         self.mcts.update_with_move(-1)
 
     def get_action(self, board, temp=1e-3, return_prob=0):
-        sensible_moves = board.availables
+        #sensible_moves = board.availables
+        sensible_moves = board.get_legal_nearby_moves()
+        #sensible_moves  = board.near_bys if board.near_bys else board.availables
+
         # the pi vector returned by MCTS as in the alphaGo Zero paper
         move_probs = np.zeros(board.width*board.height)
         if len(sensible_moves) > 0:

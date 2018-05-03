@@ -28,6 +28,10 @@ class Board(object):
         self.current_player = self.players[start_player]  # start player
         # keep available moves in a list
         self.availables = list(range(self.width * self.height))
+
+        self.near_bys = []
+        self.nearby_length = 2
+
         self.states = {}
         self.last_move = -1
 
@@ -77,6 +81,24 @@ class Board(object):
     def do_move(self, move):
         self.states[move] = self.current_player
         self.availables.remove(move)
+        # update near_by
+        """
+        location = self.move_to_location(move)
+        if move in self.near_bys:
+            self.near_bys.remove(move)
+        x = location[0]
+        y = location[1]
+
+        for r in range(x-self.nearby_length, x+self.nearby_length+1):
+            for c in range(y-self.nearby_length, y+self.nearby_length+1):
+                if r < 0 or c < 0 or r >= self.width or c >= self.width:
+                    continue
+                else:
+                    check_move = self.location_to_move([r, c])
+                    if check_move not in self.near_bys and check_move in self.availables:
+                        self.near_bys.append(check_move)
+        """
+        # end of update near_by
         self.current_player = (
             self.players[0] if self.current_player == self.players[1]
             else self.players[1]
@@ -128,6 +150,34 @@ class Board(object):
     def get_current_player(self):
         return self.current_player
 
+    def is_nearby_empty(self, nearby_length, move):
+        location = self.move_to_location(move)
+
+        x = location[0]
+        y = location[1]
+
+        for r in range(x-nearby_length, x+nearby_length+1):
+            for c in range(y-nearby_length, y+nearby_length+1):
+                if r < 0 or c < 0 or r >= self.width or c >= self.width:
+                    continue
+                else:
+                    check_move = self.location_to_move([r, c])
+                    if check_move not in self.availables:
+                        return False
+        return True
+
+    def get_legal_nearby_moves(self, nearby_length=2):
+        moves = []
+        for move in self.availables:
+            if not self.is_nearby_empty(2, move):
+                moves.append(move)
+
+        if len(self.availables) > 0 and len(moves) == 0:
+            return self.availables
+            #return [self.location_to_move([self.width // 2, self.width // 2])]
+
+        return moves
+
 
 class Game(object):
     """game server"""
@@ -175,6 +225,7 @@ class Game(object):
             current_player = self.board.get_current_player()
             player_in_turn = players[current_player]
             move = player_in_turn.get_action(self.board)
+            #print("move:", move)
             self.board.do_move(move)
             if is_shown:
                 self.graphic(self.board, player1.player, player2.player)
