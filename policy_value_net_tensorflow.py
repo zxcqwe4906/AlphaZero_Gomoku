@@ -15,6 +15,8 @@ class PolicyValueNet():
         self.board_width = board_width
         self.board_height = board_height
 
+        self.global_step = tf.Variable(0, name='global_step', trainable=False)
+
         # Define the tensorflow neural network
         # 1. Input:
         self.input_states = tf.placeholder(
@@ -80,7 +82,7 @@ class PolicyValueNet():
         # Define the optimizer we use for training
         self.learning_rate = tf.placeholder(tf.float32)
         self.optimizer = tf.train.AdamOptimizer(
-                learning_rate=self.learning_rate).minimize(self.loss)
+                learning_rate=self.learning_rate).minimize(self.loss, global_step=self.global_step)
 
         # Make a session
         self.session = tf.Session()
@@ -116,7 +118,9 @@ class PolicyValueNet():
         output: a list of (action, probability) tuples for each available
         action and the score of the board state
         """
+        #legal_positions = board.near_bys if board.near_bys else board.availables
         legal_positions = board.availables
+        #legal_positions = board.get_legal_nearby_moves()
         current_state = np.ascontiguousarray(board.current_state().reshape(
                 -1, 4, self.board_width, self.board_height))
         act_probs, value = self.policy_value(current_state)
@@ -135,7 +139,12 @@ class PolicyValueNet():
         return loss, entropy
 
     def save_model(self, model_path):
-        self.saver.save(self.session, model_path)
+        self.saver.save(self.session, model_path, global_step=self.global_step)
 
     def restore_model(self, model_path):
-        self.saver.restore(self.session, model_path)
+        latest_checkpoint = tf.train.latest_checkpoint(model_path)
+        if latest_checkpoint:
+            print("model exist")
+            self.saver.restore(self.session, latest_checkpoint)
+        else:
+            print("model not exist")
