@@ -8,6 +8,8 @@ An implementation of the training pipeline of AlphaZero for Gomoku
 from __future__ import print_function
 import random
 import numpy as np
+import os
+import sys
 import time
 from collections import defaultdict, deque
 from game import Board, Game
@@ -20,7 +22,8 @@ from policy_value_net_tensorflow import PolicyValueNet # Tensorflow
 
 
 class TrainPipeline():
-    def __init__(self, init_model=None):
+    def __init__(self, init_model):
+        self.init_model = init_model
         # params of the board and the game
         self.board_width = 6
         self.board_height = 6
@@ -47,12 +50,15 @@ class TrainPipeline():
         # num of simulations used for the pure mcts, which is used as
         # the opponent to evaluate the trained policy
         self.pure_mcts_playout_num = 1000
-        if init_model:
+        if os.path.isdir(init_model):
+            self.is_init = True
             # start training from an initial policy-value net
             self.policy_value_net = PolicyValueNet(self.board_width,
                                                    self.board_height,
                                                    model_file=init_model)
         else:
+            self.is_init = False
+            os.system('mkdir ' + init_model)
             # start training from a new policy-value net
             self.policy_value_net = PolicyValueNet(self.board_width,
                                                    self.board_height)
@@ -60,6 +66,9 @@ class TrainPipeline():
                                       c_puct=self.c_puct,
                                       n_playout=self.n_playout,
                                       is_selfplay=1)
+
+        if not os.path.isdir(init_model + 'best'):
+            os.system('mkdir ' + init_model + 'best')
 
     def get_equi_data(self, play_data):
         """augment the data set by rotation and flipping
@@ -167,11 +176,12 @@ class TrainPipeline():
         """run the training pipeline"""
         start_time = time.clock()
         try:
-            # do policy_evaluate first
-            win_ratio = self.policy_evaluate()
+            # do policy_evaluate first if using trained model
+            if self.is_init:
+                win_ratio = self.policy_evaluate()
             start_time = time.clock()
             for i in range(self.game_batch_num):
-                self.collect_selfplay_data(self.play_batch_size)
+                self.collect_selfplay_data(self.play_batch_size) # self play one game
                 print("batch i:{}, episode_len:{}".format(
                         i+1, self.episode_len))
                 if len(self.data_buffer) > self.batch_size:
@@ -183,12 +193,12 @@ class TrainPipeline():
                     print('current elapse time:', elapse_time, 'sec')
                     print("current self-play batch: {}".format(i+1))
                     win_ratio = self.policy_evaluate()
-                    self.policy_value_net.save_model('./near_by/current_policy.model')
+                    self.policy_value_net.save_model(self.init_model + 'current_policy.model')
                     if win_ratio > self.best_win_ratio:
                         print("New best policy!!!!!!!!")
                         self.best_win_ratio = win_ratio
                         # update the best_policy
-                        self.policy_value_net.save_model('./near_by/best_policy.model')
+                        self.policy_value_net.save_model(self.init_model + 'best/best_policy.model')
                         if (self.best_win_ratio == 1.0 and
                                 self.pure_mcts_playout_num < 5000):
                             self.pure_mcts_playout_num += 1000
@@ -200,6 +210,9 @@ class TrainPipeline():
 
 
 if __name__ == '__main__':
-    training_pipeline = TrainPipeline()
-    #training_pipeline = TrainPipeline('./near_by')
+    if len(sys.argv) > 1:
+        model_dir = sys.argv[1] + '/'
+    else:
+        model_dir = 'model/'
+    training_pipeline = TrainPipeline(model_dir)
     training_pipeline.run()
