@@ -178,6 +178,23 @@ class Board(object):
 
         return moves
 
+    def print_board(self):
+        width = self.width
+        height = self.height
+
+        for i in range(height - 1, -1, -1):
+            for j in range(width):
+                loc = i * width + j
+                p = self.states.get(loc, -1)
+                if p == self.players[0]:
+                    print('X', end='')
+                elif p == self.players[1]:
+                    print('O', end='')
+                else:
+                    print('.', end='')
+            print('\n', end='')
+        print('\n', end='')
+
 
 class Game(object):
     """game server"""
@@ -185,8 +202,11 @@ class Game(object):
     def __init__(self, board, **kwargs):
         self.board = board
 
-    def graphic(self, board, player1, player2):
+    def graphic(self, board, player1, player2, move=None):
         """Draw the board and show game info"""
+        COLOR = '\033[91m'
+        ENDC = '\033[0m'
+
         width = board.width
         height = board.height
 
@@ -200,13 +220,22 @@ class Game(object):
             print("{0:4d}".format(i), end='')
             for j in range(width):
                 loc = i * width + j
-                p = board.states.get(loc, -1)
-                if p == player1:
-                    print('X'.center(8), end='')
-                elif p == player2:
-                    print('O'.center(8), end='')
+                if move and loc == move:
+                    p = board.states.get(loc, -1)
+                    if p == player1:
+                        print(COLOR + 'X'.center(8) + ENDC, end='')
+                    elif p == player2:
+                        print(COLOR + 'O'.center(8) + ENDC, end='')
+                    else:
+                        print(COLOR + '_'.center(8) + ENDC, end='')
                 else:
-                    print('_'.center(8), end='')
+                    p = board.states.get(loc, -1)
+                    if p == player1:
+                        print('X'.center(8), end='')
+                    elif p == player2:
+                        print('O'.center(8), end='')
+                    else:
+                        print('_'.center(8), end='')
             print('\r\n\r\n')
 
     def start_play(self, player1, player2, start_player=0, is_shown=1):
@@ -228,7 +257,8 @@ class Game(object):
             #print("move:", move)
             self.board.do_move(move)
             if is_shown:
-                self.graphic(self.board, player1.player, player2.player)
+                self.graphic(self.board, player1.player, player2.player, move)
+                #self.board.print_board()
             end, winner = self.board.game_end()
             if end:
                 if is_shown:
@@ -256,7 +286,7 @@ class Game(object):
             # perform a move
             self.board.do_move(move)
             if is_shown:
-                self.graphic(self.board, p1, p2)
+                self.graphic(self.board, p1, p2, move)
             end, winner = self.board.game_end()
             if end:
                 # winner from the perspective of the current player of each state
