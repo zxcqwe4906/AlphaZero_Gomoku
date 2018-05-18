@@ -29,9 +29,6 @@ class Board(object):
         # keep available moves in a list
         self.availables = list(range(self.width * self.height))
 
-        self.near_bys = []
-        self.nearby_length = 2
-
         self.states = {}
         self.last_move = -1
 
@@ -81,24 +78,6 @@ class Board(object):
     def do_move(self, move):
         self.states[move] = self.current_player
         self.availables.remove(move)
-        # update near_by
-        """
-        location = self.move_to_location(move)
-        if move in self.near_bys:
-            self.near_bys.remove(move)
-        x = location[0]
-        y = location[1]
-
-        for r in range(x-self.nearby_length, x+self.nearby_length+1):
-            for c in range(y-self.nearby_length, y+self.nearby_length+1):
-                if r < 0 or c < 0 or r >= self.width or c >= self.width:
-                    continue
-                else:
-                    check_move = self.location_to_move([r, c])
-                    if check_move not in self.near_bys and check_move in self.availables:
-                        self.near_bys.append(check_move)
-        """
-        # end of update near_by
         self.current_player = (
             self.players[0] if self.current_player == self.players[1]
             else self.players[1]
@@ -178,20 +157,31 @@ class Board(object):
 
         return moves
 
-    def print_board(self):
+    def print_board(self, move=None):
         width = self.width
         height = self.height
+
+        COLOR = '\033[91m'
+        ENDC = '\033[0m'
 
         for i in range(height - 1, -1, -1):
             for j in range(width):
                 loc = i * width + j
                 p = self.states.get(loc, -1)
-                if p == self.players[0]:
-                    print('X', end='')
-                elif p == self.players[1]:
-                    print('O', end='')
+                if move and loc == move:
+                    if p == self.players[0]:
+                        print(COLOR + 'X' + ENDC, end='')
+                    elif p == self.players[1]:
+                        print(COLOR + 'O' + ENDC, end='')
+                    else:
+                        print(COLOR + '.' + ENDC, end='')
                 else:
-                    print('.', end='')
+                    if p == self.players[0]:
+                        print('X', end='')
+                    elif p == self.players[1]:
+                        print('O', end='')
+                    else:
+                        print('.', end='')
             print('\n', end='')
         print('\n', end='')
 
@@ -285,6 +275,9 @@ class Game(object):
             current_players.append(self.board.current_player)
             # perform a move
             self.board.do_move(move)
+
+            #self.board.print_board(move)
+
             if is_shown:
                 self.graphic(self.board, p1, p2, move)
             end, winner = self.board.game_end()

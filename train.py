@@ -45,7 +45,7 @@ class TrainPipeline():
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
         self.check_freq = 50
-        self.game_batch_num = 500
+        self.game_batch_num = 1000
         self.best_win_ratio = 0.0
         # num of simulations used for the pure mcts, which is used as
         # the opponent to evaluate the trained policy
@@ -96,19 +96,25 @@ class TrainPipeline():
         """collect self-play data for training"""
         for i in range(n_games):
             winner, play_data = self.game.start_self_play(self.mcts_player,
-                                                          temp=self.temp)
+                                                          temp=self.temp, is_shown=0)
+
             play_data = list(play_data)[:]
             self.episode_len = len(play_data)
             # augment the data
             play_data = self.get_equi_data(play_data)
             self.data_buffer.extend(play_data)
 
-    def policy_update(self):
+    def policy_update(self, drop_trained=False):
         """update the policy-value net"""
-        mini_batch = random.sample(self.data_buffer, self.batch_size)
+        #mini_batch = random.sample(self.data_buffer, self.batch_size)
+        sample_index = random.sample(range(len(self.data_buffer)), self.batch_size)
+        mini_batch = [self.data_buffer[i] for i in sample_index]
+
         state_batch = [data[0] for data in mini_batch]
         mcts_probs_batch = [data[1] for data in mini_batch]
         winner_batch = [data[2] for data in mini_batch]
+
+
         old_probs, old_v = self.policy_value_net.policy_value(state_batch)
         for i in range(self.epochs):
             loss, entropy = self.policy_value_net.train_step(
@@ -135,6 +141,17 @@ class TrainPipeline():
         explained_var_new = (1 -
                              np.var(np.array(winner_batch) - new_v.flatten()) /
                              np.var(np.array(winner_batch)))
+        # remove sample when trained
+        if drop_trained:
+            removed_batch = random.sample(sample_index, self.batch_size // 2)
+            #removed_batch = sample_index
+            removed_batch.sort()
+            delete = 0
+            for i in removed_batch:
+                del self.data_buffer[i-delete]
+                delete += 1
+        # end of drop trained
+
         print(("kl:{:.5f},"
                "lr_multiplier:{:.3f},"
                "loss:{},"
@@ -161,10 +178,11 @@ class TrainPipeline():
                                      n_playout=self.pure_mcts_playout_num)
         win_cnt = defaultdict(int)
         for i in range(n_games):
+            print('game:', i)
             winner = self.game.start_play(current_mcts_player,
                                           pure_mcts_player,
                                           start_player=i % 2,
-                                          is_shown=0)
+                                          is_shown=1)
             win_cnt[winner] += 1
         win_ratio = 1.0*(win_cnt[1] + 0.5*win_cnt[-1]) / n_games
         print("num_playouts:{}, win: {}, lose: {}, tie:{}".format(
@@ -178,14 +196,18 @@ class TrainPipeline():
         try:
             # do policy_evaluate first if using trained model
             if self.is_init:
-                win_ratio = self.policy_evaluate()
+                self.best_win_ratio = self.policy_evaluate()
+                if self.best_win_ratio == 1.0 and self.pure_mcts_playout_num < 5000:
+                    self.pure_mcts_playout_num += 1000
+                    self.best_win_ratio = 0.0
             start_time = time.clock()
             for i in range(self.game_batch_num):
                 self.collect_selfplay_data(self.play_batch_size) # self play one game
+                #print('buffer size:', len(self.data_buffer))
                 print("batch i:{}, episode_len:{}".format(
                         i+1, self.episode_len))
                 if len(self.data_buffer) > self.batch_size:
-                    loss, entropy = self.policy_update()
+                    loss, entropy = self.policy_update(drop_trained=True) # can control if drop trained
                 # check the performance of the current model,
                 # and save the model params
                 if (i+1) % self.check_freq == 0:

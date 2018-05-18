@@ -8,6 +8,9 @@ network to guide the tree search and evaluate the leaf nodes
 
 import numpy as np
 import copy
+import threading
+import time
+import logging
 
 
 def softmax(x):
@@ -30,6 +33,8 @@ class TreeNode(object):
         self._Q = 0
         self._u = 0
         self._P = prior_p
+        self._loss = 1.0
+        self.lock = threading.Lock()
 
     def expand(self, action_priors):
         """Expand tree by creating new children.
@@ -45,18 +50,31 @@ class TreeNode(object):
         plus bonus u(P).
         Return: A tuple of (action, next_node)
         """
-        return max(self._children.items(),
-                   key=lambda act_node: act_node[1].get_value(c_puct))
+
+        self.lock.acquire()
+        max_node = max(self._children.items(),
+                       key=lambda act_node: act_node[1].get_value(c_puct) * act_node[1]._loss)
+
+        max_node[1]._loss *= 0.9
+
+        self.lock.release()
+
+        return max_node
 
     def update(self, leaf_value):
         """Update node values from leaf evaluation.
         leaf_value: the value of subtree evaluation from the current player's
             perspective.
         """
+        self.lock.acquire()
         # Count visit.
         self._n_visits += 1
         # Update Q, a running average of values for all visits.
         self._Q += 1.0*(leaf_value - self._Q) / self._n_visits
+        # self._Q = (self._Q*(self._n_visits-1) + self._n_visits*(leaf_value)) / self._n_visits*1.0
+
+        self._loss /= 0.9
+        self.lock.release()
 
     def update_recursive(self, leaf_value):
         """Like a call to update(), but applied recursively for all ancestors.
@@ -65,6 +83,24 @@ class TreeNode(object):
         if self._parent:
             self._parent.update_recursive(-leaf_value)
         self.update(leaf_value)
+
+        """
+        self._n_visits += 1
+        self._Q += 1.0*(leaf_value - self._Q) / self._n_visits
+        tmp = self._parent
+        i=1
+        while tmp:
+            if i % 2 == 1:
+                value = -leaf_value
+            else:
+                value = leaf_value
+
+            tmp._n_visits += 1
+            tmp._Q += 1.0*(value - tmp._Q) / tmp._n_visits
+
+            i += 1
+            tmp = tmp._parent
+        """
 
     def get_value(self, c_puct):
         """Calculate and return the value for this node.
@@ -113,7 +149,10 @@ class MCTS(object):
             if node.is_leaf():
                 break
             # Greedily select next move.
+            # state is a board
             action, node = node.select(self._c_puct)
+
+
             state.do_move(action)
 
         # Evaluate the leaf using a network which outputs a list of
@@ -136,21 +175,98 @@ class MCTS(object):
         # Update value and visit count of nodes in this traversal.
         node.update_recursive(-leaf_value)
 
+    def _batch_playout(self, state, n):
+        #logging.debug('Starting')
+        for i in range(n): # run n playout
+            # initial board
+            move_list = []
+            current_player = state.current_player
+            last_move = state.last_move
+
+            node = self._root
+            while(1):
+                if node.is_leaf():
+                    break
+                action, node = node.select(self._c_puct)
+
+                state.do_move(action)
+
+                move_list.append(action)
+
+                #print('move, avai, move_list', action, state.availables, move_list)
+                #input()
+
+            action_probs, leaf_value = self._policy(state)
+            end, winner = state.game_end()
+            if not end:
+                node.expand(action_probs)
+            else:
+                if winner == -1:  # tie
+                    leaf_value = 0.0
+                else:
+                    leaf_value = (
+                        1.0 if winner == state.get_current_player() else -1.0
+                    )
+
+            node.update_recursive(-leaf_value)
+            # reset board
+            state.availables.extend(move_list)
+            state.last_move = last_move
+            state.current_player = current_player
+            for move in move_list:
+                del state.states[move]
+        #logging.debug('Exiting')
+
     def get_move_probs(self, state, temp=1e-3):
         """Run all playouts sequentially and return the available actions and
         their corresponding probabilities.
         state: the current game state
         temp: temperature parameter in (0, 1] controls the level of exploration
         """
+
+        # can do parallel ?
+        """
         for n in range(self._n_playout):
             state_copy = copy.deepcopy(state)
             self._playout(state_copy)
+        """
+
+
+        thread_num = 3
+        threads = []
+
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='(%(threadName)-10s) %(message)s',
+        )
+
+        for i in range(thread_num):
+            state_copy = copy.deepcopy(state)
+            t = threading.Thread(target=self._batch_playout, args=(state_copy, self._n_playout))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        print('all joined')
+
+
+        #state_copy = copy.deepcopy(state)
+        #self._batch_playout(state_copy, self._n_playout)
 
         # calc the move probabilities based on visit counts at the root node
         act_visits = [(act, node._n_visits)
                       for act, node in self._root._children.items()]
         acts, visits = zip(*act_visits)
+
         act_probs = softmax(1.0/temp * np.log(np.array(visits) + 1e-10))
+
+        #if len(state.states) < 5:
+        #    act_probs = np.array(visits) / np.sum(np.array(visits))
+        #else:
+        #    act_probs = softmax(1.0/temp * np.log(np.array(visits) + 1e-10))
+
 
         return acts, act_probs
 
@@ -183,8 +299,8 @@ class MCTSPlayer(object):
         self.mcts.update_with_move(-1)
 
     def get_action(self, board, temp=1e-3, return_prob=0):
-        #sensible_moves = board.availables
-        sensible_moves = board.get_legal_nearby_moves()
+        sensible_moves = board.availables
+        #sensible_moves = board.get_legal_nearby_moves()
         #sensible_moves  = board.near_bys if board.near_bys else board.availables
 
         # the pi vector returned by MCTS as in the alphaGo Zero paper
@@ -197,7 +313,7 @@ class MCTSPlayer(object):
                 # self-play training)
                 move = np.random.choice(
                     acts,
-                    p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs)))
+                    p=0.8*probs + 0.2*np.random.dirichlet(0.3*np.ones(len(probs)))
                 )
                 # update the root node and reuse the search tree
                 self.mcts.update_with_move(move)
